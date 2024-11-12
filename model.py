@@ -327,10 +327,20 @@ class HertzDevModel(nn.Module):
 
         
     @T.no_grad()
-    def next_latent(self, model_input: T.Tensor, temps=(0.8, (0.5, 0.1))):
+    def next_latent(self, model_input: T.Tensor, temps=(0.8, (0.5, 0.1)), split=None):
 
         if self.c.split:
             logits1, logits2 = self.forward(model_input)
+
+            if exists(split):
+                if exists(self.cache[0]):
+                    self.cache = self.cache.repeat(1, split, 1, 1, 1, 1)
+                logits1 = logits1.repeat(split, 1, 1)
+                logits2 = logits2.repeat(split, 1, 1)
+                model_input = model_input.repeat(split, 1, 1)
+                if exists(self.resynthesizer.cache[0]):
+                    self.resynthesizer.cache = self.resynthesizer.cache.repeat(1, split, 1, 1, 1, 1)
+
             next_logits1 = logits1[:, -1]
             next_logits2 = logits2[:, -1]
             next_token1 = F.softmax(next_logits1 / temps[0], dim=-1).multinomial(1)
@@ -339,6 +349,15 @@ class HertzDevModel(nn.Module):
             next_input = self.resynthesizer(model_input, next_tokens=(next_token1, next_token2), temps=temps[1])
         else:
             logits = self.forward(model_input)
+
+            if exists(split):
+                if exists(self.cache[0]):
+                    self.cache = self.cache.repeat(1, split, 1, 1, 1, 1)
+                logits = logits.repeat(split, 1, 1)
+                model_input = model_input.repeat(split, 1, 1)
+                if exists(self.resynthesizer.cache[0]):
+                    self.resynthesizer.cache = self.resynthesizer.cache.repeat(1, split, 1, 1, 1, 1)
+
             next_logits = logits[:, -1]
             next_token = F.softmax(next_logits / temps[0], dim=-1).multinomial(1)
 
@@ -348,22 +367,27 @@ class HertzDevModel(nn.Module):
 
 
     @T.no_grad()
-    def completion(self, data: T.Tensor, temps=(0.8, (0.5, 0.1)), gen_len=None, use_cache=True) -> T.Tensor:
+    def completion(self, data: T.Tensor, temps=(0.8, (0.5, 0.1)), gen_len=None, use_cache=True, num_completions=1) -> T.Tensor:
         """
         only accepts latent-space data.
         """
-        if use_cache:
-            self.init_cache(data.shape[0], data.device, T.bfloat16)
 
         next_input = generated = data
+        num_completion_threads = data.shape[0] * num_completions
 
         target_len = min(data.shape[1] + default(gen_len, data.shape[1]), self.c.stack_config.seq_len)
-        
+
+        if use_cache:
+            self.init_cache(data.shape[0], data.device, T.bfloat16, length=target_len)
+
         for _ in tqdm0(range(data.shape[1], target_len)):
             model_input = next_input if use_cache else generated
 
-            next_input = self.next_latent(model_input, temps)
-    
+            split = num_completions if model_input.shape[0] != num_completion_threads else None
+            next_input = self.next_latent(model_input, temps, split)
+
+            if generated.shape[0] != num_completion_threads:
+                generated = generated.repeat(num_completion_threads, 1, 1)
             generated = T.cat([generated, next_input], dim=1)
 
         if use_cache:
