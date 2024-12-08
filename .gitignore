@@ -7,3 +7,5 @@
 !prompts/*.m4a
 __pycache__
 *ckpt
+.aider*
+.env
