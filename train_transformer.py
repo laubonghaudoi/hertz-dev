@@ -8,7 +8,7 @@ from torch.optim import AdamW
 from torch.cuda.amp import autocast, GradScaler
 import wandb
 
-from config.train_config import TrainingConfig
+from config.transformer_config import TrainingConfig
 from model import get_hertz_dev_config, HertzDevModel
 from tokenizer import make_tokenizer
 from utils import print_colored, tqdm0
